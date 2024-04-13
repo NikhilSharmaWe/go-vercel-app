@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+option go_package = "github.com/NikhilSharmaWe/go-vercel-app/upload/proto";
+
+service UploadService{
+	rpc UploadRepo(UploadRequest) returns (UploadResponse);
+}
+
+message UploadRequest {
+	string githubRepoEndpoint = 1;
+	string projectID = 2;
+}
+
+message UploadResponse {
+	string projectID = 1;
+}

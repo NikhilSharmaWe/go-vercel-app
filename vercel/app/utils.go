@@ -11,14 +11,59 @@ import (
 	"net/mail"
 	"net/smtp"
 	"os"
+	"sync"
 
 	"github.com/NikhilSharmaWe/go-vercel-app/models"
+	"github.com/NikhilSharmaWe/go-vercel-app/store"
+	"github.com/google/go-github/github"
 	"github.com/gorilla/sessions"
 	"github.com/labstack/echo/v4"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+type Application struct {
+	CookieStore *sessions.CookieStore
+	store.UserStore
+	store.GithubTokenStore
+	GithubClientID        string
+	GithubClientSecret    string
+	GithubAPICallbackPath string
+	GithubClients         map[string]*github.Client
+	AppEmail              string
+	AppPassword           string
+	SMTPHost              string
+	SMTPPort              string
+	sync.RWMutex
+}
+
+func NewApplication() *Application {
+	db := createDB()
+
+	userStore := store.NewUserStore(db)
+
+	clientID := os.Getenv("CLIENT_ID")
+	clientSecret := os.Getenv("CLIENT_SECRET")
+	callbackPath := os.Getenv("GITHUB_OAUTH_CALLBACK_PATH")
+	appPassword := os.Getenv("APP_PASSWORD")
+	appEmail := os.Getenv("APP_EMAIL")
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := os.Getenv("SMTP_PORT")
+
+	return &Application{
+		CookieStore:           sessions.NewCookieStore([]byte(os.Getenv("SECRET"))),
+		UserStore:             userStore,
+		GithubClientID:        clientID,
+		GithubClientSecret:    clientSecret,
+		GithubAPICallbackPath: callbackPath,
+		GithubClients:         make(map[string]*github.Client),
+		AppEmail:              appEmail,
+		AppPassword:           appPassword,
+		SMTPHost:              smtpHost,
+		SMTPPort:              smtpPort,
+	}
+}
 
 func createDB() *gorm.DB {
 	db, err := gorm.Open(postgres.Open(os.Getenv("DBADDRESS")), &gorm.Config{})

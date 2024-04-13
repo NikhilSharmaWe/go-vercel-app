@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+option go_package = "github.com/NikhilSharmaWe/go-vercel-app/deploy/proto";
+
+service DeployService{
+	rpc DeployProject(DeployRequest) returns (DeployResponse);
+}
+
+message DeployRequest {
+	string projectID = 1;
+}
+
+message DeployResponse {
+	string projectID = 1;
+}

@@ -1,2 +1,2 @@
-vars.env
-/bin/
+**/vars.env
+**/bin/

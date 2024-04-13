@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sync"
 
 	"github.com/NikhilSharmaWe/go-vercel-app/models"
-	"github.com/NikhilSharmaWe/go-vercel-app/store"
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
 	"gorm.io/gorm"
@@ -17,50 +15,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
-
-type Application struct {
-	CookieStore *sessions.CookieStore
-	store.UserStore
-	store.GithubTokenStore
-	GithubClientID        string
-	GithubClientSecret    string
-	GithubAPICallbackPath string
-	GithubClients         map[string]*github.Client
-	AppEmail              string
-	AppPassword           string
-	SMTPHost              string
-	SMTPPort              string
-	sync.RWMutex
-}
-
-func NewApplication() *Application {
-	db := createDB()
-
-	userStore := store.NewUserStore(db)
-	// githubTokenStore := store.NewGithubTokenStore(db)
-
-	clientID := os.Getenv("CLIENT_ID")
-	clientSecret := os.Getenv("CLIENT_SECRET")
-	callbackPath := os.Getenv("GITHUB_OAUTH_CALLBACK_PATH")
-	appPassword := os.Getenv("APP_PASSWORD")
-	appEmail := os.Getenv("APP_EMAIL")
-	smtpHost := os.Getenv("SMTP_HOST")
-	smtpPort := os.Getenv("SMTP_PORT")
-
-	return &Application{
-		CookieStore: sessions.NewCookieStore([]byte(os.Getenv("SECRET"))),
-		UserStore:   userStore,
-		// GithubTokenStore:      githubTokenStore,
-		GithubClientID:        clientID,
-		GithubClientSecret:    clientSecret,
-		GithubAPICallbackPath: callbackPath,
-		GithubClients:         make(map[string]*github.Client),
-		AppEmail:              appEmail,
-		AppPassword:           appPassword,
-		SMTPHost:              smtpHost,
-		SMTPPort:              smtpPort,
-	}
-}
 
 func Router() *echo.Echo {
 	app := NewApplication()
@@ -83,7 +37,7 @@ func Router() *echo.Echo {
 
 	e.GET(app.GithubAPICallbackPath, app.HandleGithubCallback)
 	e.GET("/continue/github", app.HandleGithubAuth)
-	e.GET("/logout", app.HandleLogout)
+	e.GET("/logout", app.HandleLogout, app.IfNotLogined)
 
 	e.POST("/continue/email", app.HandleAuthWithEmail, app.IfAlreadyLogined)
 	e.POST("/verify", app.HandleVerifyEmail, app.IfAlreadyLogined)

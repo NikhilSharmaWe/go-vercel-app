@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/NikhilSharmaWe/go-vercel-app/app"
+	"github.com/NikhilSharmaWe/go-vercel-app/vercel/app"
 	"github.com/joho/godotenv"
 )
 
