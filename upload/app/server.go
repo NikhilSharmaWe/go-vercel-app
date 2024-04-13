@@ -8,9 +8,9 @@ import (
 	"google.golang.org/grpc"
 )
 
-func makeUploadServerAndRun(listenAddr string, svc UploadService) error {
-	uploadServer := NewUploadServer(svc)
-	ln, err := net.Listen("tcp", listenAddr)
+func (app *Application) MakeUploadServerAndRun() error {
+	uploadServer := NewUploadServer(app)
+	ln, err := net.Listen("tcp", app.Addr)
 	if err != nil {
 		return err
 	}
@@ -27,15 +27,16 @@ type UploadServer struct {
 	proto.UnimplementedUploadServiceServer
 }
 
-func NewUploadServer(svc UploadService) *UploadServer {
+func NewUploadServer(app *Application) *UploadServer {
 	return &UploadServer{
-		svc: svc,
+		svc: NewUploadService(app),
 	}
 }
 
 func (s *UploadServer) UploadRepo(ctx context.Context, req *proto.UploadRequest) (*proto.UploadResponse, error) {
 	if err := s.svc.Upload(UploadRequest{
 		GithubRepoEndpoint: req.GithubRepoEndpoint,
+		ProjectID:          req.ProjectID,
 	}); err != nil {
 		return nil, err
 	}

@@ -5,7 +5,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-func newUploadClient(remoteAddr string) (proto.UploadServiceClient, error) {
+func NewUploadClient(remoteAddr string) (proto.UploadServiceClient, error) {
 	conn, err := grpc.Dial(remoteAddr, grpc.WithInsecure())
 	if err != nil {
 		return nil, err
