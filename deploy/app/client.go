@@ -5,7 +5,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-func newDeployClient(remoteAddr string) (proto.DeployServiceClient, error) {
+func NewDeployClient(remoteAddr string) (proto.DeployServiceClient, error) {
 	conn, err := grpc.Dial(remoteAddr, grpc.WithInsecure())
 	if err != nil {
 		return nil, err

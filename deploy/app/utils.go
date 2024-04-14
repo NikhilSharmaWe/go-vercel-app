@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -47,6 +48,43 @@ func clone(url, projectID string) error {
 	})
 
 	return err
+}
+
+func (app *Application) getListOfAllFiles(projectID string) ([]string, error) {
+	objKeys := []string{}
+
+	objectCh := app.MinioClient.ListObjects(context.Background(), app.MinioBucketName, minio.ListObjectsOptions{
+		Prefix:    projectID,
+		Recursive: true,
+	})
+
+	for object := range objectCh {
+		if object.Err != nil {
+			return objKeys, object.Err
+		}
+
+		objKeys = append(objKeys, object.Key)
+	}
+
+	return objKeys, nil
+}
+
+func (app *Application) getFilesAndSaveLocally(objKeys []string) error {
+	for _, objKey := range objKeys {
+		if err := app.MinioClient.FGetObject(context.Background(), app.MinioBucketName, objKey, "./local-clones/"+objKey, minio.GetObjectOptions{}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func build(projectID string) error {
+	command := exec.Command("/bin/bash", "-c", "npm i && npm run build")
+	command.Dir = "./local-clones/" + projectID
+	cmdErr := command.Run()
+
+	return cmdErr
 }
 
 func (app *Application) pushToMinio(folderPath string) error {

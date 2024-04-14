@@ -8,9 +8,9 @@ import (
 	"google.golang.org/grpc"
 )
 
-func makeDeployServerAndRun(listenAddr string, svc DeployService) error {
-	deployServer := NewDeployServer(svc)
-	ln, err := net.Listen("tcp", listenAddr)
+func (app *Application) MakeDeployServerAndRun() error {
+	deployServer := NewDeployServer(app)
+	ln, err := net.Listen("tcp", app.Addr)
 	if err != nil {
 		return err
 	}
@@ -27,13 +27,13 @@ type DeployServer struct {
 	proto.UnimplementedDeployServiceServer
 }
 
-func NewDeployServer(svc DeployService) *DeployServer {
+func NewDeployServer(app *Application) *DeployServer {
 	return &DeployServer{
-		svc: svc,
+		svc: NewDeployService(app),
 	}
 }
 
-func (s *DeployServer) Deploy(ctx context.Context, req *proto.DeployRequest) (*proto.DeployResponse, error) {
+func (s *DeployServer) DeployRepo(ctx context.Context, req *proto.DeployRequest) (*proto.DeployResponse, error) {
 	if err := s.svc.Deploy(DeployRequest{
 		ProjectID: req.ProjectID,
 	}); err != nil {
