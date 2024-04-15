@@ -16,8 +16,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
-func Router() *echo.Echo {
-	app := NewApplication()
+func (app *Application) Router() *echo.Echo {
 
 	e := echo.New()
 	e.Pre(middleware.RemoveTrailingSlash())
@@ -41,6 +40,7 @@ func Router() *echo.Echo {
 
 	e.POST("/continue/email", app.HandleAuthWithEmail, app.IfAlreadyLogined)
 	e.POST("/verify", app.HandleVerifyEmail, app.IfAlreadyLogined)
+	e.POST("/deploy", app.HandleDeploy, app.IfNotLogined)
 
 	return e
 }
@@ -281,5 +281,11 @@ func (app *Application) HandleLogout(c echo.Context) error {
 		return err
 	}
 
+	return nil
+}
+
+func (app *Application) HandleDeploy(c echo.Context) error {
+	repoEndpoint := c.FormValue("repo-endpoint")
+	fmt.Println("HERE: ", repoEndpoint)
 	return nil
 }

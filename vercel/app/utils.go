@@ -15,30 +15,39 @@ import (
 
 	"github.com/NikhilSharmaWe/go-vercel-app/models"
 	"github.com/NikhilSharmaWe/go-vercel-app/store"
+	"github.com/NikhilSharmaWe/go-vercel-app/vercel/internal"
 	"github.com/google/go-github/github"
 	"github.com/gorilla/sessions"
 	"github.com/labstack/echo/v4"
 
+	amqp "github.com/rabbitmq/amqp091-go"
 	"gorm.io/driver/postgres"
+
 	"gorm.io/gorm"
 )
 
 type Application struct {
 	CookieStore *sessions.CookieStore
 	store.UserStore
-	store.GithubTokenStore
+
 	GithubClientID        string
 	GithubClientSecret    string
 	GithubAPICallbackPath string
 	GithubClients         map[string]*github.Client
-	AppEmail              string
-	AppPassword           string
-	SMTPHost              string
-	SMTPPort              string
+
+	AppEmail    string
+	AppPassword string
+	SMTPHost    string
+	SMTPPort    string
+
+	UploadRequestQueue   *amqp.Queue
+	UploadResponseQueue  *amqp.Queue
+	DeployRequestQueue   *amqp.Queue
+	DeployResponseQueueu *amqp.Queue
 	sync.RWMutex
 }
 
-func NewApplication() *Application {
+func NewApplication() (*Application, error) {
 	db := createDB()
 
 	userStore := store.NewUserStore(db)
@@ -51,6 +60,31 @@ func NewApplication() *Application {
 	smtpHost := os.Getenv("SMTP_HOST")
 	smtpPort := os.Getenv("SMTP_PORT")
 
+	rabbitMQUser := os.Getenv("RABBITMQ_USER")
+	rabbitMQPassword := os.Getenv("RABBITMQ_PASSWORD")
+	rabbitMQVhost := os.Getenv("RABBITMQ_VHOST")
+	rabbitMQAddr := os.Getenv("RABBITMQ_ADDR")
+
+	uploadReqQueue, err := internal.CreateNewQueueWithNewConnAndClient(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost, "upload-request", true, true)
+	if err != nil {
+		return nil, err
+	}
+
+	uploadRespQueue, err := internal.CreateNewQueueWithNewConnAndClient(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost, "upload-response", true, true)
+	if err != nil {
+		return nil, err
+	}
+
+	deployReqQueue, err := internal.CreateNewQueueWithNewConnAndClient(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost, "deploy-request", true, true)
+	if err != nil {
+		return nil, err
+	}
+
+	deployRespQueue, err := internal.CreateNewQueueWithNewConnAndClient(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost, "deploy-response", true, true)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Application{
 		CookieStore:           sessions.NewCookieStore([]byte(os.Getenv("SECRET"))),
 		UserStore:             userStore,
@@ -62,7 +96,11 @@ func NewApplication() *Application {
 		AppPassword:           appPassword,
 		SMTPHost:              smtpHost,
 		SMTPPort:              smtpPort,
-	}
+		UploadRequestQueue:    uploadReqQueue,
+		UploadResponseQueue:   uploadRespQueue,
+		DeployRequestQueue:    deployReqQueue,
+		DeployResponseQueueu:  deployRespQueue,
+	}, nil
 }
 
 func createDB() *gorm.DB {
