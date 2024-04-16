@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/NikhilSharmaWe/go-vercel-app/vercel/internal"
 	"github.com/NikhilSharmaWe/go-vercel-app/vercel/models"
@@ -157,7 +159,10 @@ func (app *Application) HandleGithubCallback(c echo.Context) error {
 
 	gc := github.NewClient(tc)
 
-	emails, _, err := gc.Users.ListEmails(context.Background(), &github.ListOptions{})
+	ctx, cancelFunc := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelFunc()
+
+	emails, _, err := gc.Users.ListEmails(ctx, &github.ListOptions{})
 	if err != nil {
 		c.Logger().Error(err)
 		return err
@@ -303,9 +308,14 @@ func (app *Application) HandleDeploy(c echo.Context) error {
 
 	app.ProjectChannels[projectID] = make(chan models.RabbitMQResponse)
 
+	errCh := make(chan error)
+
 	go func() {
 		for message := range app.ProjectChannels[projectID] {
 			msg := message
+			if !msg.Success {
+				errCh <- errors.New(msg.Error)
+			}
 			fmt.Printf("Message: %+v\n", msg)
 		}
 	}()
@@ -321,7 +331,10 @@ func (app *Application) HandleDeploy(c echo.Context) error {
 		return err
 	}
 
-	if err := client.Send(context.Background(), "upload", "upload-request", amqp.Publishing{
+	ctx, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelFunc()
+
+	if err := client.Send(ctx, "upload", "upload-request", amqp.Publishing{
 		ContentType:  "application/json",
 		Body:         body,
 		ReplyTo:      "upload-response-" + app.RabbitMQInstanceID,
@@ -331,8 +344,5 @@ func (app *Application) HandleDeploy(c echo.Context) error {
 		return err
 	}
 
-	var blocking chan struct{}
-	<-blocking
-
-	return nil
+	return <-errCh
 }

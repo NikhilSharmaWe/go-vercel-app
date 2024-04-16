@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/NikhilSharmaWe/go-vercel-app/upload/internal"
+	"github.com/NikhilSharmaWe/go-vercel-app/upload/proto"
 	git "github.com/go-git/go-git/v5"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -22,9 +22,11 @@ type Application struct {
 	MinioBucketName string
 	ConsumingClient *internal.RabbitClient
 	PublishingConn  *amqp.Connection
+	UploadClient    proto.UploadServiceClient
 }
 
 func NewApplication() (*Application, error) {
+	addr := os.Getenv("ADDR")
 	minioServerAddr := os.Getenv("MINIO_SERVER_ADDR")
 	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
 	minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
@@ -34,7 +36,7 @@ func NewApplication() (*Application, error) {
 		Creds: credentials.NewStaticV4(minioAccessKey, minioSecretKey, ""),
 	})
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	rabbitMQUser := os.Getenv("RABBITMQ_USER")
@@ -60,12 +62,23 @@ func NewApplication() (*Application, error) {
 		return nil, err
 	}
 
+	_, err = internal.CreateNewQueueReturnClient(consumingConn, "upload-request", true, true)
+	if err != nil {
+		return nil, err
+	}
+
+	uploadClient, err := NewUploadClient(addr)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Application{
-		Addr:            os.Getenv("ADDR"),
+		Addr:            addr,
 		MinioClient:     client,
 		MinioBucketName: minioBucketName,
 		ConsumingClient: consumingClient,
 		PublishingConn:  publishingConn,
+		UploadClient:    uploadClient,
 	}, nil
 }
 
