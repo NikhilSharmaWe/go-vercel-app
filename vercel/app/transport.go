@@ -2,13 +2,18 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 
-	"github.com/NikhilSharmaWe/go-vercel-app/models"
+	"github.com/NikhilSharmaWe/go-vercel-app/vercel/internal"
+	"github.com/NikhilSharmaWe/go-vercel-app/vercel/models"
 	"github.com/google/go-github/github"
+	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/oauth2"
+
 	"gorm.io/gorm"
 
 	"github.com/gorilla/sessions"
@@ -287,5 +292,47 @@ func (app *Application) HandleLogout(c echo.Context) error {
 func (app *Application) HandleDeploy(c echo.Context) error {
 	repoEndpoint := c.FormValue("repo-endpoint")
 	fmt.Println("HERE: ", repoEndpoint)
+
+	client, err := internal.NewRabbitMQClient(app.PublishingConn)
+	if err != nil {
+		c.Logger().Error(err)
+		return err
+	}
+
+	projectID := uuid.NewString()
+
+	app.ProjectChannels[projectID] = make(chan models.RabbitMQResponse)
+
+	go func() {
+		for message := range app.ProjectChannels[projectID] {
+			msg := message
+			fmt.Printf("Message: %+v\n", msg)
+		}
+	}()
+
+	uploadReq := models.UploadRequest{
+		GithubRepoEndpoint: repoEndpoint,
+		ProjectID:          projectID,
+	}
+
+	body, err := json.Marshal(uploadReq)
+	if err != nil {
+		c.Logger().Error(err)
+		return err
+	}
+
+	if err := client.Send(context.Background(), "upload", "upload-request", amqp.Publishing{
+		ContentType:  "application/json",
+		Body:         body,
+		ReplyTo:      "upload-response-" + app.RabbitMQInstanceID,
+		DeliveryMode: amqp.Persistent,
+	}); err != nil {
+		c.Logger().Error(err)
+		return err
+	}
+
+	var blocking chan struct{}
+	<-blocking
+
 	return nil
 }

@@ -13,19 +13,26 @@ import (
 	"os"
 	"sync"
 
-	"github.com/NikhilSharmaWe/go-vercel-app/models"
-	"github.com/NikhilSharmaWe/go-vercel-app/store"
 	"github.com/NikhilSharmaWe/go-vercel-app/vercel/internal"
+	"github.com/NikhilSharmaWe/go-vercel-app/vercel/models"
+	"github.com/NikhilSharmaWe/go-vercel-app/vercel/store"
 	"github.com/google/go-github/github"
+	"github.com/google/uuid"
 	"github.com/gorilla/sessions"
 	"github.com/labstack/echo/v4"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+
 	"gorm.io/driver/postgres"
 
 	"gorm.io/gorm"
 )
 
+// For rabbitMQ name for exchange, queue and routing key are the same in all 4 cases
+// upload-request-{instance_id}
+// upload-response-{instance_id}
+// deploy-request-{instance_id}
+// deploy-response-{instance_id}
 type Application struct {
 	CookieStore *sessions.CookieStore
 	store.UserStore
@@ -40,11 +47,16 @@ type Application struct {
 	SMTPHost    string
 	SMTPPort    string
 
-	UploadRequestQueue   *amqp.Queue
-	UploadResponseQueue  *amqp.Queue
-	DeployRequestQueue   *amqp.Queue
-	DeployResponseQueueu *amqp.Queue
+	UploadResponseClient *internal.RabbitClient
+
+	DeployResponseClient *internal.RabbitClient
+
+	PublishingConn *amqp.Connection
+
+	RabbitMQInstanceID string
 	sync.RWMutex
+
+	ProjectChannels map[string]chan models.RabbitMQResponse
 }
 
 func NewApplication() (*Application, error) {
@@ -65,22 +77,37 @@ func NewApplication() (*Application, error) {
 	rabbitMQVhost := os.Getenv("RABBITMQ_VHOST")
 	rabbitMQAddr := os.Getenv("RABBITMQ_ADDR")
 
-	uploadReqQueue, err := internal.CreateNewQueueWithNewConnAndClient(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost, "upload-request", true, true)
+	instanceID := uuid.NewString()
+
+	// each concurrent task should be done with new channel
+	// different connections should be used for publishing and consuming
+
+	consumingConnection, err := internal.ConnectRabbitMQ(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost)
 	if err != nil {
 		return nil, err
 	}
 
-	uploadRespQueue, err := internal.CreateNewQueueWithNewConnAndClient(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost, "upload-response", true, true)
+	publishingConnection, err := internal.ConnectRabbitMQ(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost)
 	if err != nil {
 		return nil, err
 	}
 
-	deployReqQueue, err := internal.CreateNewQueueWithNewConnAndClient(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost, "deploy-request", true, true)
+	_, err = internal.CreateNewQueueReturnClient(publishingConnection, "upload-request", true, true)
 	if err != nil {
 		return nil, err
 	}
 
-	deployRespQueue, err := internal.CreateNewQueueWithNewConnAndClient(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost, "deploy-response", true, true)
+	uploadResponseClient, err := internal.CreateNewQueueReturnClient(consumingConnection, "upload-response-"+instanceID, true, true)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = internal.CreateNewQueueReturnClient(publishingConnection, "deploy-request", true, true)
+	if err != nil {
+		return nil, err
+	}
+
+	deployResponseClient, err := internal.CreateNewQueueReturnClient(consumingConnection, "deploy-response-"+instanceID, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +123,15 @@ func NewApplication() (*Application, error) {
 		AppPassword:           appPassword,
 		SMTPHost:              smtpHost,
 		SMTPPort:              smtpPort,
-		UploadRequestQueue:    uploadReqQueue,
-		UploadResponseQueue:   uploadRespQueue,
-		DeployRequestQueue:    deployReqQueue,
-		DeployResponseQueueu:  deployRespQueue,
+		// UploadRequestQueue:    uploadReqQueue,
+		// UploadResponseQueue:   uploadRespQueue,
+		// DeployRequestQueue:    deployReqQueue,
+		// DeployResponseQueueu:  deployRespQueue,
+		UploadResponseClient: uploadResponseClient,
+		DeployResponseClient: deployResponseClient,
+		RabbitMQInstanceID:   instanceID,
+		PublishingConn:       publishingConnection,
+		ProjectChannels:      make(map[string]chan models.RabbitMQResponse),
 	}, nil
 }
 

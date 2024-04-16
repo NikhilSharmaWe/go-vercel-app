@@ -3,7 +3,7 @@ package store
 import (
 	"errors"
 
-	"github.com/NikhilSharmaWe/go-vercel-app/models"
+	"github.com/NikhilSharmaWe/go-vercel-app/vercel/models"
 	"gorm.io/gorm"
 )
 
