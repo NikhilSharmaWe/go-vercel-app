@@ -88,7 +88,7 @@ func handleUploadRequests(application *app.Application, msg amqp.Delivery) error
 		log.Println("Error: ", err)
 	}
 
-	fmt.Printf("RESPONSE: %+v\n", req)
+	fmt.Printf("Request: %+v\n", req)
 
 	var response app.UploadResponse
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 
@@ -40,31 +39,17 @@ func main() {
 
 	// upload
 	go func() {
-		//bind and consume and send the status to channel map in application
 		for message := range uploadRespMSGBus {
 			msg := message
 
 			g.Go(func() error {
-				return handleUploadResponses(application, msg)
-				// response := models.RabbitMQResponse{}
-
-				// log.Printf("New message: %+v\n", msg)
-				// if err := msg.Ack(false); err != nil {
-				// 	log.Println("Ack message failed")
-				// 	return err
-				// }
-
-				// if err := json.Unmarshal(msg.Body, &response); err != nil {
-				// 	return err
-				// }
-
-				// fmt.Printf("RESPONSE: %+v\n", response)
-
-				// response.Service = "upload"
-
-				// application.ProjectChannels[response.ProjectID] <- response
-
-				// return nil
+				response, err := handleUploadResponses(application, msg)
+				if err != nil {
+					log.Println("ERROR: ", err)
+				} else {
+					application.ProjectChannels[response.ProjectID] <- *response
+				}
+				return nil
 			})
 		}
 	}()
@@ -88,28 +73,17 @@ func setupRabbitMQForStartup(application *app.Application) (<-chan amqp.Delivery
 	return uploadRespMSGBus, nil
 }
 
-func handleUploadResponses(application *app.Application, msg amqp.Delivery) error {
-	response := models.RabbitMQResponse{}
-
-	log.Printf("New message: %+v\n", msg)
-	if err := msg.Ack(false); err != nil {
-		log.Println("Ack message failed")
-		return err
-	}
+func handleUploadResponses(application *app.Application, msg amqp.Delivery) (*models.RabbitMQResponse, error) {
+	response := &models.RabbitMQResponse{Type: "upload"}
 
 	if err := json.Unmarshal(msg.Body, &response); err != nil {
-		return err
+		return nil, err
 	}
-
-	fmt.Printf("RESPONSE: %+v\n", response)
-
-	response.Service = "upload"
 
 	_, ok := application.ProjectChannels[response.ProjectID]
 	if !ok {
-		return errors.New("project do not exists")
+		return nil, errors.New("project do not exists")
 	}
-	application.ProjectChannels[response.ProjectID] <- response
 
-	return nil
+	return response, nil
 }

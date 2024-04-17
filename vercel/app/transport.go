@@ -295,8 +295,14 @@ func (app *Application) HandleLogout(c echo.Context) error {
 }
 
 func (app *Application) HandleDeploy(c echo.Context) error {
-	repoEndpoint := c.FormValue("repo-endpoint")
-	fmt.Println("HERE: ", repoEndpoint)
+	var (
+		projectID    = uuid.NewString()
+		repoEndpoint = c.FormValue("repo-endpoint")
+		errCh        = make(chan error)
+		progress     = make(chan string)
+	)
+
+	app.ProjectChannels[projectID] = make(chan models.RabbitMQResponse)
 
 	client, err := internal.NewRabbitMQClient(app.PublishingConn)
 	if err != nil {
@@ -304,19 +310,22 @@ func (app *Application) HandleDeploy(c echo.Context) error {
 		return err
 	}
 
-	projectID := uuid.NewString()
-
-	app.ProjectChannels[projectID] = make(chan models.RabbitMQResponse)
-
-	errCh := make(chan error)
-
 	go func() {
 		for message := range app.ProjectChannels[projectID] {
 			msg := message
 			if !msg.Success {
 				errCh <- errors.New(msg.Error)
 			}
-			fmt.Printf("Message: %+v\n", msg)
+
+			switch msg.Type {
+			case "upload":
+				fmt.Printf("RECIEVED RESPONSE FROM UPLOAD SERVICE: %+v\n", msg)
+				fmt.Println("STATUS IS UPLOADED")
+				progress <- "deploy"
+			case "deploy":
+			default:
+				errCh <- models.ErrInvalidResponseFromRabbitMQ
+			}
 		}
 	}()
 
@@ -344,5 +353,22 @@ func (app *Application) HandleDeploy(c echo.Context) error {
 		return err
 	}
 
-	return <-errCh
+	fmt.Println("STATUS IS UPLOADING")
+
+	select {
+	case err := <-errCh:
+		c.Logger().Error(err)
+		return err
+	case prg := <-progress:
+		if prg != "deploy" {
+			c.Logger().Error(models.ErrUnexpected)
+			return models.ErrUnexpected
+		}
+		fmt.Println("SEND REQUEST TO DEPLOY: ", prg)
+	case <-time.After(1 * time.Minute):
+		c.Logger().Error(models.ErrUploadServiceTimeout)
+		return echo.NewHTTPError(http.StatusRequestTimeout, models.ErrUploadServiceTimeout)
+	}
+
+	return nil
 }

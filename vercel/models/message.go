@@ -2,7 +2,7 @@ package models
 
 type RabbitMQResponse struct {
 	ProjectID string `json:"projectID"`
-	Service   string `json:"service"`
+	Type      string `json:"type"`
 	Success   bool   `json:"success"`
 	Error     string `json:"error"`
 }
