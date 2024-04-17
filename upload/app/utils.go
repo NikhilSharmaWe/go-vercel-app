@@ -46,7 +46,6 @@ func NewApplication() (*Application, error) {
 
 	// each concurrent task should be done with new channel
 	// different connections should be used for publishing and consuming
-
 	consumingConn, err := internal.ConnectRabbitMQ(rabbitMQUser, rabbitMQPassword, rabbitMQAddr, rabbitMQVhost)
 	if err != nil {
 		return nil, err
@@ -110,11 +109,7 @@ func (app *Application) pushToMinio(folderPath string) error {
 		absolutefilePath := cwd + "/" + strings.TrimPrefix(path, "./")
 		key := strings.TrimPrefix(path, "local-clones/")
 
-		fmt.Println("ABSOLUTE PATH: ", absolutefilePath)
-		fmt.Println("OBJECT KEY: ", key)
-
-		info, err := app.MinioClient.FPutObject(context.Background(), app.MinioBucketName, key, absolutefilePath, minio.PutObjectOptions{})
-		fmt.Printf("UPLOAD INFO: %+v\n", info)
+		_, err = app.MinioClient.FPutObject(context.Background(), app.MinioBucketName, key, absolutefilePath, minio.PutObjectOptions{})
 
 		return err
 	})

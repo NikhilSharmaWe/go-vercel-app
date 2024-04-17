@@ -3,6 +3,9 @@ package app
 import (
 	"bytes"
 	"crypto/rand"
+	math_rand "math/rand"
+	"time"
+
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,15 +51,14 @@ type Application struct {
 	SMTPPort    string
 
 	UploadResponseClient *internal.RabbitClient
-
 	DeployResponseClient *internal.RabbitClient
+	ProjectChannels      map[string]chan models.RabbitMQResponse
+	PublishingConn       *amqp.Connection
+	RabbitMQInstanceID   string
 
-	PublishingConn *amqp.Connection
+	RequestHandlerServerAddr string
 
-	RabbitMQInstanceID string
 	sync.RWMutex
-
-	ProjectChannels map[string]chan models.RabbitMQResponse
 }
 
 func NewApplication() (*Application, error) {
@@ -113,25 +115,22 @@ func NewApplication() (*Application, error) {
 	}
 
 	return &Application{
-		CookieStore:           sessions.NewCookieStore([]byte(os.Getenv("SECRET"))),
-		UserStore:             userStore,
-		GithubClientID:        clientID,
-		GithubClientSecret:    clientSecret,
-		GithubAPICallbackPath: callbackPath,
-		GithubClients:         make(map[string]*github.Client),
-		AppEmail:              appEmail,
-		AppPassword:           appPassword,
-		SMTPHost:              smtpHost,
-		SMTPPort:              smtpPort,
-		// UploadRequestQueue:    uploadReqQueue,
-		// UploadResponseQueue:   uploadRespQueue,
-		// DeployRequestQueue:    deployReqQueue,
-		// DeployResponseQueueu:  deployRespQueue,
-		UploadResponseClient: uploadResponseClient,
-		DeployResponseClient: deployResponseClient,
-		RabbitMQInstanceID:   instanceID,
-		PublishingConn:       publishingConnection,
-		ProjectChannels:      make(map[string]chan models.RabbitMQResponse),
+		CookieStore:              sessions.NewCookieStore([]byte(os.Getenv("SECRET"))),
+		UserStore:                userStore,
+		GithubClientID:           clientID,
+		GithubClientSecret:       clientSecret,
+		GithubAPICallbackPath:    callbackPath,
+		GithubClients:            make(map[string]*github.Client),
+		AppEmail:                 appEmail,
+		AppPassword:              appPassword,
+		SMTPHost:                 smtpHost,
+		SMTPPort:                 smtpPort,
+		UploadResponseClient:     uploadResponseClient,
+		DeployResponseClient:     deployResponseClient,
+		RabbitMQInstanceID:       instanceID,
+		PublishingConn:           publishingConnection,
+		ProjectChannels:          make(map[string]chan models.RabbitMQResponse),
+		RequestHandlerServerAddr: os.Getenv("REQUEST_HANDLER_ADDR"),
 	}, nil
 }
 
@@ -171,6 +170,16 @@ func setSession(c echo.Context, keyValues map[string]any) error {
 	}
 
 	return session.Save(c.Request(), c.Response())
+}
+
+func getSession(c echo.Context, key string) (string, error) {
+	session := c.Get("session").(*sessions.Session)
+	v, ok := session.Values[key]
+	if !ok {
+		return "", models.ErrInvalidRequest
+	}
+
+	return v.(string), nil
 }
 
 func clearSessionHandler(c echo.Context) error {
@@ -250,7 +259,7 @@ func validMailAddress(address string) bool {
 	return err == nil
 }
 
-func generateSimpleOTP(length int) (string, error) {
+func generateOTP(length int) (string, error) {
 	b := make([]byte, length)
 	_, err := io.ReadAtLeast(rand.Reader, b, length)
 	if err != nil {
@@ -263,8 +272,20 @@ func generateSimpleOTP(length int) (string, error) {
 	return string(b), nil
 }
 
+func generateID(length int) string {
+	charset := "abcdefghijklmnopqrstuvwxyz0123456789"
+	id := make([]byte, length)
+
+	seedRand := math_rand.New(math_rand.NewSource(time.Now().UnixNano()))
+	for i := range id {
+		id[i] = charset[seedRand.Intn(len(charset))]
+	}
+
+	return string(id)
+}
+
 func (app *Application) setupEmailVerification(c echo.Context, username, email string) error {
-	code, err := generateSimpleOTP(5)
+	code, err := generateOTP(5)
 	if err != nil {
 		return err
 	}

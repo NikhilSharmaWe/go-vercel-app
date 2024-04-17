@@ -13,4 +13,7 @@ var (
 	ErrUploadServiceTimeout        = errors.New("upload service timeout")
 	ErrUnexpected                  = errors.New("unexpected error occured")
 	ErrInvalidResponseFromRabbitMQ = errors.New("invalid response from rabbitmq")
+	ErrProjectNotExists            = errors.New("project do not exists")
+	ErrConfirmationTimeout         = errors.New("confirmation timeout")
+	ErrInvalidRequest              = errors.New("invalid request")
 )

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -12,13 +13,13 @@ import (
 	"github.com/NikhilSharmaWe/go-vercel-app/vercel/internal"
 	"github.com/NikhilSharmaWe/go-vercel-app/vercel/models"
 	"github.com/google/go-github/github"
-	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"golang.org/x/oauth2"
 
 	"gorm.io/gorm"
 
 	"github.com/gorilla/sessions"
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
@@ -44,9 +45,11 @@ func (app *Application) Router() *echo.Echo {
 	e.GET(app.GithubAPICallbackPath, app.HandleGithubCallback)
 	e.GET("/continue/github", app.HandleGithubAuth)
 	e.GET("/logout", app.HandleLogout, app.IfNotLogined)
+	e.GET("/start-processing", app.HandleProcessing, app.IfNotLogined)
 
 	e.POST("/continue/email", app.HandleAuthWithEmail, app.IfAlreadyLogined)
 	e.POST("/verify", app.HandleVerifyEmail, app.IfAlreadyLogined)
+	// e.POST("/deploy", app.HandleDeploy, app.IfNotLogined)
 	e.POST("/deploy", app.HandleDeploy, app.IfNotLogined)
 
 	return e
@@ -296,11 +299,56 @@ func (app *Application) HandleLogout(c echo.Context) error {
 
 func (app *Application) HandleDeploy(c echo.Context) error {
 	var (
-		projectID    = uuid.NewString()
 		repoEndpoint = c.FormValue("repo-endpoint")
-		errCh        = make(chan error)
-		progress     = make(chan string)
+		projectID    = generateID(5)
 	)
+
+	if err := setSession(c, map[string]any{
+		"repo_endpoint": repoEndpoint,
+		"project_id":    projectID,
+	}); err != nil {
+		c.Logger().Error(err)
+		return err
+	}
+
+	if err := c.File("./public/processing/processing.html"); err != nil {
+		c.Logger().Error(err)
+		return err
+	}
+
+	return nil
+}
+
+func (app *Application) HandleProcessing(c echo.Context) error {
+	var (
+		upgrader = websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				return true
+			},
+		}
+		errCh  = make(chan error)
+		status = make(chan string)
+	)
+
+	projectID, err := getSession(c, "project_id")
+	if err != nil {
+		c.Logger().Error(err)
+		return err
+	}
+
+	repoEndpoint, err := getSession(c, "repo_endpoint")
+	if err != nil {
+		c.Logger().Error(err)
+		return err
+	}
+
+	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err != nil {
+		c.Logger().Error(err)
+		return err
+	}
+
+	defer conn.Close()
 
 	app.ProjectChannels[projectID] = make(chan models.RabbitMQResponse)
 
@@ -319,10 +367,13 @@ func (app *Application) HandleDeploy(c echo.Context) error {
 
 			switch msg.Type {
 			case "upload":
-				fmt.Printf("RECIEVED RESPONSE FROM UPLOAD SERVICE: %+v\n", msg)
-				fmt.Println("STATUS IS UPLOADED")
-				progress <- "deploy"
+				log.Printf("Project: %s: %s", projectID, "uploaded")
+				conn.WriteMessage(1, []byte("uploaded"))
+				status <- "uploaded"
 			case "deploy":
+				log.Printf("Project: %s: %s", projectID, "deployed")
+				conn.WriteMessage(1, []byte("deployed"))
+				status <- "deployed"
 			default:
 				errCh <- models.ErrInvalidResponseFromRabbitMQ
 			}
@@ -353,22 +404,62 @@ func (app *Application) HandleDeploy(c echo.Context) error {
 		return err
 	}
 
-	fmt.Println("STATUS IS UPLOADING")
+	log.Printf("Project: %s: %s", projectID, "uploading")
+	conn.WriteMessage(1, []byte("uploading"))
 
-	select {
-	case err := <-errCh:
-		c.Logger().Error(err)
-		return err
-	case prg := <-progress:
-		if prg != "deploy" {
-			c.Logger().Error(models.ErrUnexpected)
-			return models.ErrUnexpected
+	ticker := time.NewTicker(1 * time.Minute)
+
+	for {
+		select {
+		case err := <-errCh:
+			c.Logger().Error(err)
+			return err
+
+		case s := <-status:
+
+			switch s {
+			case "uploaded":
+				deployReq := models.DeployRequest{
+					ProjectID: projectID,
+				}
+
+				body, err := json.Marshal(deployReq)
+				if err != nil {
+					c.Logger().Error(err)
+					return err
+				}
+
+				ctx, cancelFunc := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancelFunc()
+
+				if err := client.Send(ctx, "deploy", "deploy-request", amqp.Publishing{
+					ContentType:  "application/json",
+					Body:         body,
+					ReplyTo:      "deploy-response-" + app.RabbitMQInstanceID,
+					DeliveryMode: amqp.Persistent,
+				}); err != nil {
+					c.Logger().Error(err)
+					return err
+				}
+
+				log.Printf("Project: %s: %s", projectID, "deploying")
+				conn.WriteMessage(1, []byte("deploying"))
+
+				ticker.Stop()
+				ticker.Reset(10 * time.Minute)
+
+			case "deployed":
+				conn.WriteMessage(1, []byte(fmt.Sprint("WEBSITE ENDPOINT IS: ", projectID, app.RequestHandlerServerAddr)))
+				return nil
+
+			default:
+				c.Logger().Error(models.ErrUnexpected)
+				return models.ErrUnexpected
+			}
+
+		case <-ticker.C:
+			c.Logger().Error(models.ErrUploadServiceTimeout)
+			return echo.NewHTTPError(http.StatusRequestTimeout, models.ErrUploadServiceTimeout)
 		}
-		fmt.Println("SEND REQUEST TO DEPLOY: ", prg)
-	case <-time.After(1 * time.Minute):
-		c.Logger().Error(models.ErrUploadServiceTimeout)
-		return echo.NewHTTPError(http.StatusRequestTimeout, models.ErrUploadServiceTimeout)
 	}
-
-	return nil
 }

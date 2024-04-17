@@ -3,8 +3,8 @@ package internal
 import (
 	"context"
 	"fmt"
-	"log"
 
+	"github.com/NikhilSharmaWe/go-vercel-app/vercel/models"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -27,7 +27,6 @@ func NewRabbitMQClient(conn *amqp.Connection) (*RabbitClient, error) {
 		return nil, err
 	}
 
-	// put the channel to confirm mode
 	if err := ch.Confirm(false); err != nil {
 		return nil, err
 	}
@@ -64,58 +63,52 @@ func CreateNewQueueReturnClient(conn *amqp.Connection, queueName string, durable
 	return client, nil
 }
 
-// CreateBinding will bind the current channel to the given exchange using the routing key provided
 func (rc RabbitClient) CreateBinding(name, binding, exchange string) error {
-	// we have create the customer_events exchange through the cli
-	// having nowait to false will make the channel return error if it is fail to bind
 	return rc.ch.QueueBind(name, binding, exchange, false, nil)
 }
 
-// Send is used to publish payloads onto an exchange with the given routing key
 func (rc RabbitClient) Send(ctx context.Context, exchange, routingKey string, options amqp.Publishing) error {
 	return rc.ch.PublishWithContext(
 		ctx,
 		exchange,
 		routingKey,
-		// Mandatory is used to determine if an error should be returned upon failure
 		true,
-		// Immediate
 		false,
 		options,
 	)
 }
 
-// PublishWithDeferredConfirmWithContext is not acknowledgement, it is that server acknowledges that it has published the message on the exchange, they are different but it is good to know that the message is sent successfully
 func (rc RabbitClient) SendWithConfirmingPublish(ctx context.Context, exchange, routingKey string, options amqp.Publishing) error {
-	// this only works if
 	confirmation, err := rc.ch.PublishWithDeferredConfirmWithContext(
 		ctx,
 		exchange,
 		routingKey,
-		// Mandatory is used to determine if an error should be returned upon failure
 		true,
-		// Immediate
 		false,
 		options,
 	)
-
 	if err != nil {
 		return err
 	}
 
-	log.Println(confirmation.Wait())
-	return nil
+	done := make(chan bool)
+	go func() {
+		res := confirmation.Wait()
+		done <- res
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return models.ErrConfirmationTimeout
+	}
 }
 
 func (rc RabbitClient) Consume(queue, consumer string, autoAck bool) (<-chan amqp.Delivery, error) {
-	// if auto ack is set to true then the consumer will send the acknowledgement when the message is consumed but this is not a good practice for the services which can fail, because if we send the ack and the service fail that message will be lost. so we should send the ack manually after the service completes the task from the message consumed from the queue
 	return rc.ch.Consume(queue, consumer, autoAck, false, false, false, nil)
 }
 
-// ApplyQOS
-// prefetch count - an integer on how many unacknowledged messages the server can send
-// prefetch size - is int of how many bytes
-// global - detemines if the rule should be applied globally or not
 func (rc RabbitClient) ApplyQualtyOfService(count, size int, global bool) error {
 	return rc.ch.Qos(count, size, global)
 }

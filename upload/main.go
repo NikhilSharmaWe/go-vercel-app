@@ -27,6 +27,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	defer application.ConsumingClient.Close()
+
 	uploadRequestMSGBus, err := setupRabbitMQForStartup(application)
 	if err != nil {
 		log.Fatal(err)
@@ -35,15 +37,15 @@ func main() {
 	g, _ := errgroup.WithContext(context.Background())
 	g.SetLimit(50)
 
-	defer func() {
-		application.ConsumingClient.Close()
-	}()
-
 	go func() {
 		for message := range uploadRequestMSGBus {
 			msg := message
 			g.Go(func() error {
-				return handleUploadRequests(application, msg)
+				if err := handleUploadRequests(application, msg); err != nil {
+					log.Println("ERROR: ", err)
+				}
+
+				return nil
 			})
 		}
 	}()
@@ -78,38 +80,30 @@ func handleUploadRequests(application *app.Application, msg amqp.Delivery) error
 
 	req := proto.UploadRequest{}
 
-	log.Printf("New message: %+v\n", msg)
-	if err := msg.Ack(false); err != nil {
-		log.Println("Ack message failed")
+	if err := json.Unmarshal(msg.Body, &req); err != nil {
 		return err
 	}
-
-	if err := json.Unmarshal(msg.Body, &req); err != nil {
-		log.Println("Error: ", err)
-	}
-
-	fmt.Printf("Request: %+v\n", req)
-
-	var response app.UploadResponse
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancelFunc()
 
+	var response *app.UploadResponse
+
 	resp, err := application.UploadClient.UploadRepo(ctx, &req)
 	if err != nil {
-		response = app.UploadResponse{
+		response = &app.UploadResponse{
 			ProjectID: req.ProjectID,
 			Success:   false,
-			Error:     err.Error(),
+			Error:     fmt.Sprint("UPLOAD SERVICE: ", err.Error()),
 		}
 	} else {
-		response = app.UploadResponse{
+		response = &app.UploadResponse{
 			ProjectID: resp.ProjectID,
 			Success:   true,
 		}
 	}
 
-	body, err := json.Marshal(response)
+	body, err := json.Marshal(*response)
 	if err != nil {
 		return err
 	}

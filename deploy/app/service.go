@@ -20,7 +20,6 @@ func NewDeployService(app *Application) DeployService {
 }
 
 func (svc *deployService) Deploy(req DeployRequest) error {
-
 	localCloneFolderPath := fmt.Sprintf("./local-clones/%s", req.ProjectID)
 
 	objKeys, err := svc.app.getListOfAllFiles(req.ProjectID)

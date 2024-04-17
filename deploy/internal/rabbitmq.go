@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/NikhilSharmaWe/go-vercel-app/upload/models"
+	"github.com/NikhilSharmaWe/go-vercel-app/deploy/models"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -105,7 +105,6 @@ func (rc RabbitClient) SendWithConfirmingPublish(ctx context.Context, exchange, 
 		return models.ErrConfirmationTimeout
 	}
 }
-
 func (rc RabbitClient) Consume(queue, consumer string, autoAck bool) (<-chan amqp.Delivery, error) {
 	return rc.ch.Consume(queue, consumer, autoAck, false, false, false, nil)
 }
