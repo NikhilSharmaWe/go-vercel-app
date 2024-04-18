@@ -31,10 +31,17 @@ import (
 	"gorm.io/gorm"
 )
 
-// For rabbitMQ name for exchange, queue and routing key are the same in all 4 cases
-// upload-request-{instance_id}
-// upload-response-{instance_id}
-// deploy-request-{instance_id}
+// For rabbitMQ name for queue and routing key are the same in all 4 cases due to direct type exchange
+
+// The application requires 2 exchanges: "upload" and "deploy"
+// And 4 queues
+
+// For upload exchange:
+// upload-request: request to upload server will be load balanced so same name for all instances of upload servers
+// upload-response-{instance_id}: requires instance id to handle the response on the same instance which makes the request to the grpc server
+
+// For deploy exchange:
+// deploy-request
 // deploy-response-{instance_id}
 type Application struct {
 	CookieStore *sessions.CookieStore

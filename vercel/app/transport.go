@@ -351,6 +351,7 @@ func (app *Application) HandleProcessing(c echo.Context) error {
 	defer conn.Close()
 
 	app.ProjectChannels[projectID] = make(chan models.RabbitMQResponse)
+	defer delete(app.ProjectChannels, projectID)
 
 	client, err := internal.NewRabbitMQClient(app.PublishingConn)
 	if err != nil {
